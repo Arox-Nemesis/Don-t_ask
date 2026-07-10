@@ -1,62 +1,97 @@
 import asyncio
+import signal
 
 from bot.client import app
-from bot.commands import register_commands
 from bot.scheduler import NewsScheduler
+from bot.commands import register_commands
+
 from database.mongo import mongo
 from utils.logger import LOGGER
 
 
 async def startup():
 
-    LOGGER.info("Connecting to MongoDB...")
+    LOGGER.info("=" * 60)
+    LOGGER.info("Starting Anime News Bot...")
+    LOGGER.info("=" * 60)
 
+    # Connect MongoDB
     await mongo.connect()
 
-    LOGGER.info("Starting Telegram Bot...")
-
+    # Start Telegram Bot
     await app.start()
 
-    register_commands(app)
-
+    # Create Scheduler
     scheduler = NewsScheduler(app)
 
+    # Register Commands
+    register_commands(app, scheduler)
+
+    # Start Scheduler
     scheduler.start()
 
-    # Run once immediately on startup
+    # Run one check immediately
+    LOGGER.info("Running Initial News Check...")
     await scheduler.check_news()
 
+    LOGGER.info("=" * 60)
     LOGGER.info("Anime News Bot Started Successfully")
+    LOGGER.info("=" * 60)
 
-    await asyncio.Event().wait()
+    return scheduler
 
 
-async def shutdown():
+async def shutdown(scheduler):
 
-    LOGGER.info("Shutting Down...")
+    LOGGER.info("=" * 60)
+    LOGGER.info("Stopping Anime News Bot...")
+    LOGGER.info("=" * 60)
 
-    await mongo.close()
+    try:
+        await scheduler.stop()
+    except Exception:
+        pass
 
-    await app.stop()
+    try:
+        await mongo.close()
+    except Exception:
+        pass
 
-    LOGGER.info("Bot Stopped")
+    try:
+        await app.stop()
+    except Exception:
+        pass
+
+    LOGGER.info("Shutdown Complete")
 
 
 async def main():
 
-    try:
+    scheduler = await startup()
 
-        await startup()
+    stop_event = asyncio.Event()
 
-    except KeyboardInterrupt:
+    def stop_signal(*args):
+        stop_event.set()
 
-        pass
+    loop = asyncio.get_running_loop()
 
-    finally:
+    for sig in (
+        signal.SIGINT,
+        signal.SIGTERM,
+    ):
+        try:
+            loop.add_signal_handler(
+                sig,
+                stop_signal
+            )
+        except NotImplementedError:
+            pass
 
-        await shutdown()
+    await stop_event.wait()
+
+    await shutdown(scheduler)
 
 
 if __name__ == "__main__":
-
     asyncio.run(main())
