@@ -1,11 +1,11 @@
 from pyrogram import Client
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.enums import ParseMode
 from pyrogram.errors import RPCError
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import CHANNEL_ID, FALLBACK_IMAGE
-from utils.logger import LOGGER
 from utils.formatter import formatter
-from database.mongo import mongo
+from utils.logger import LOGGER
 
 
 class NewsPoster:
@@ -13,78 +13,93 @@ class NewsPoster:
     def __init__(self, app: Client):
         self.app = app
 
-    def build_keyboard(self, article: dict):
+    @staticmethod
+    def keyboard(article: dict):
+
         return InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        text="🔗 Read More",
+                        "🔗 Read More",
                         url=article["url"]
                     )
                 ]
             ]
         )
 
-    async def post_article(self, article: dict):
-
-        if await mongo.article_exists(article["url"]):
-            LOGGER.info(
-                f"Skipped: {article['title']}"
-            )
-            return False
+    async def send(self, article: dict) -> bool:
 
         caption = formatter.format_caption(article)
 
-        keyboard = self.build_keyboard(article)
+        keyboard = self.keyboard(article)
 
         photo = article.get("image") or FALLBACK_IMAGE
 
+        # First try article image
         try:
 
             await self.app.send_photo(
                 chat_id=CHANNEL_ID,
                 photo=photo,
                 caption=caption,
-                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard
             )
 
             LOGGER.info(
                 f"Posted: {article['title']}"
             )
 
+            return True
+
         except RPCError as err:
 
             LOGGER.warning(
-                f"Photo failed ({err}). Using fallback."
+                f"Article image failed: {err}"
             )
 
-            try:
+        # Fallback image
+        try:
 
-                await self.app.send_photo(
-                    chat_id=CHANNEL_ID,
-                    photo=FALLBACK_IMAGE,
-                    caption=caption,
-                    reply_markup=keyboard,
-                )
+            await self.app.send_photo(
+                chat_id=CHANNEL_ID,
+                photo=FALLBACK_IMAGE,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard
+            )
 
-            except Exception:
+            LOGGER.info(
+                f"Posted using fallback image: {article['title']}"
+            )
 
-                await self.app.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=caption,
-                    reply_markup=keyboard,
-                    disable_web_page_preview=False,
-                )
+            return True
+
+        except RPCError as err:
+
+            LOGGER.warning(
+                f"Fallback image failed: {err}"
+            )
+
+        # Text-only fallback
+        try:
+
+            await self.app.send_message(
+                chat_id=CHANNEL_ID,
+                text=caption,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+                reply_markup=keyboard
+            )
+
+            LOGGER.info(
+                f"Posted text message: {article['title']}"
+            )
+
+            return True
 
         except Exception as err:
 
-            LOGGER.error(err)
+            LOGGER.exception(err)
 
             return False
-
-        await mongo.save_article(article)
-
-        return True
-
-
-poster = None
