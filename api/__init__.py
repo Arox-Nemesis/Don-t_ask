@@ -1,0 +1,1 @@
+# AniNewsAPI Client Package
