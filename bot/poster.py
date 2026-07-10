@@ -87,4 +87,4 @@ class NewsPoster:
         return True
 
 
-poster = NewsPoster
+poster = None
