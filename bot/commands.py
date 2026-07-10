@@ -6,11 +6,22 @@ from database.mongo import mongo
 from api.client import api
 
 
-def register_commands(app):
+from bot.scheduler import scheduler
 
-    @app.on_message(
-        filters.command("ping")
-        & filters.user(OWNER_ID)
+   @app.on_message(
+      filters.command("checknews")
+      & filters.user(OWNER_ID)
+    )
+    async def check_news_command(_, message: Message):
+
+       await message.reply_text(
+            "🔍 Checking for latest news..."
+        )
+
+        await scheduler.check_news()
+
+        await message.reply_text(
+            "✅ News check completed."
     )
     async def ping(_, message: Message):
 
