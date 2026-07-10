@@ -1,24 +1,23 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from api.client import api
-from database.mongo import mongo
 from bot.poster import NewsPoster
-from utils.logger import LOGGER
+from database.mongo import mongo
 from config import CHECK_INTERVAL
+from utils.logger import LOGGER
 
 
 class NewsScheduler:
 
     def __init__(self, app):
-        self.app = app
+
         self.poster = NewsPoster(app)
+
         self.scheduler = AsyncIOScheduler()
 
     async def check_news(self):
-        """
-        Fetch latest news and post only new articles.
-        """
 
+        LOGGER.info("=" * 60)
         LOGGER.info("Checking AniNewsAPI...")
 
         try:
@@ -26,28 +25,57 @@ class NewsScheduler:
             articles = await api.fetch_news()
 
             if not articles:
+
                 LOGGER.info("No articles received.")
+
                 return
 
+            # Oldest first
+            articles.sort(
+                key=lambda article: article["published"]
+            )
+
+            fetched = len(articles)
+            skipped = 0
             posted = 0
 
             for article in articles:
 
-                if await mongo.article_exists(article["url"]):
+                exists = await mongo.article_exists(
+                    article["url"]
+                )
+
+                if exists:
+
+                    skipped += 1
+
                     continue
 
-                success = await self.poster.post_article(article)
+                success = await self.poster.send(
+                    article
+                )
 
                 if success:
+
+                    await mongo.save_article(
+                        article
+                    )
+
                     posted += 1
 
             await mongo.save_last_sync()
 
+            LOGGER.info("=" * 60)
             LOGGER.info(
-                f"News Check Complete | "
-                f"Fetched: {len(articles)} | "
-                f"Posted: {posted}"
+                f"Fetched : {fetched}"
             )
+            LOGGER.info(
+                f"Posted  : {posted}"
+            )
+            LOGGER.info(
+                f"Skipped : {skipped}"
+            )
+            LOGGER.info("=" * 60)
 
         except Exception as err:
 
@@ -57,18 +85,27 @@ class NewsScheduler:
 
         self.scheduler.add_job(
             self.check_news,
-            "interval",
+            trigger="interval",
             seconds=CHECK_INTERVAL,
+            id="anime_news",
             max_instances=1,
             coalesce=True,
+            replace_existing=True,
         )
 
         self.scheduler.start()
 
         LOGGER.info(
             f"Scheduler Started "
-            f"({CHECK_INTERVAL}s)"
+            f"({CHECK_INTERVAL} seconds)"
         )
 
+    async def stop(self):
 
-scheduler = NewsScheduler
+        self.scheduler.shutdown(
+            wait=False
+        )
+
+        LOGGER.info(
+            "Scheduler Stopped"
+        )
