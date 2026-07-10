@@ -71,4 +71,4 @@ class NewsScheduler:
         )
 
 
-scheduler = None
+scheduler = NewsScheduler
